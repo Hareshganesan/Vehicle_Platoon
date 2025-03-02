@@ -241,24 +241,13 @@ def main():
             else:
                 world.wait_for_tick()
 
-            # Draw speed, braking, and platooning status above each vehicle
+            # Process each vehicle for platooning status
             for vehicle_id in vehicles_list:
                 vehicle = world.get_actor(vehicle_id)
                 velocity = vehicle.get_velocity()
                 speed = 3.6 * (velocity.x**2 + velocity.y**2 + velocity.z**2)**0.5  # Convert m/s to km/h
                 control = vehicle.get_control()
                 braking = control.brake
-
-                # Determine color based on speed
-                if speed < 20:
-                    speed_color = carla.Color(r=0, g=255, b=0)  # Green for low speed
-                elif speed < 50:
-                    speed_color = carla.Color(r=255, g=255, b=0)  # Yellow for medium speed
-                else:
-                    speed_color = carla.Color(r=255, g=0, b=0)  # Red for high speed
-
-                # Determine color based on braking
-                brake_color = carla.Color(r=255, g=0, b=0) if braking > 0 else carla.Color(r=0, g=255, b=0)
 
                 # Check platooning status
                 platooning = "No"
@@ -270,17 +259,36 @@ def main():
                             platooning = "Yes"
                             break
 
+                # Check if vehicle is slowing down at a signal or moving from a stop
+                if (braking > 0 and speed < 10) or (braking == 0 and speed > 0 and speed < 10):
+                    platooning = "Yes"
+
+                # Check if vehicle is maintaining a consistent distance from the vehicle in front
+                if platooning == "Yes":
+                    for other_vehicle_id in vehicles_list:
+                        if other_vehicle_id != vehicle_id:
+                            other_vehicle = world.get_actor(other_vehicle_id)
+                            distance_between_vehicles = vehicle.get_location().distance(other_vehicle.get_location())
+                            if distance_between_vehicles < 10.0:
+                                other_vehicle_velocity = other_vehicle.get_velocity()
+                                other_vehicle_speed = 3.6 * (other_vehicle_velocity.x**2 + other_vehicle_velocity.y**2 + other_vehicle_velocity.z**2)**0.5
+                                if abs(speed - other_vehicle_speed) < 5:  # Speed difference threshold for platooning
+                                    platooning = "Yes"
+                                else:
+                                    platooning = "No"
+                                break
+
+                # Determine color based on platooning status
+                platooning_color = carla.Color(r=0, g=255, b=0) if platooning == "Yes" else carla.Color(r=255, g=0, b=0)
+
                 # Check distance between spectator and vehicle
                 distance = vehicle.get_location().distance(spectator.get_location())
                 if distance < 50.0:  # Only show text if within 50 meters
-                    text = f"Speed: {speed:.2f} km/h\nBraking: {'Yes' if braking > 0 else 'No'}\nPlatooning: {platooning}"
+                    text = f"Platooning: {platooning}"
                     world.debug.draw_string(vehicle.get_location() + carla.Location(z=2.5), text, draw_shadow=True,
-                                            color=speed_color, life_time=0.1, persistent_lines=False)
-                    world.debug.draw_string(vehicle.get_location() + carla.Location(z=2.0), "Braking", draw_shadow=True,
-                                            color=brake_color, life_time=0.1, persistent_lines=False)
+                                            color=platooning_color, life_time=0.1, persistent_lines=False)  # Reduced life_time
 
     finally:
-
         if not args.asynch and synchronous_master:
             settings = world.get_settings()
             settings.synchronous_mode = False
@@ -294,7 +302,6 @@ def main():
         time.sleep(0.5)
 
 if __name__ == '__main__':
-
     try:
         main()
     except KeyboardInterrupt:
